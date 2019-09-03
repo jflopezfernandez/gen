@@ -625,12 +625,21 @@ const char* license_text_gpl3 =
 "                     END OF TERMS AND CONDITIONS\n"
 "\n";
 
-char* create_include_directive(char* filename) {
-    int length = (int) strlen("#include \"\"\n") + strlen(filename);
+typedef enum header_type_e {
+    HEADER_TYPE_UNDEFINED,
+    HEADER_TYPE_SYSTEM,
+    HEADER_TYPE_PROJECT
+} header_type_t;
+
+char* create_include_directive(char* filename, header_type_t header_type) {
+    const char* include_start = (header_type == HEADER_TYPE_SYSTEM) ? "<" : "\"";
+    const char* include_end   = (header_type == HEADER_TYPE_SYSTEM) ? ">" : "\"";
+
+    int length = (int) strlen("#include \"\"") + strlen(filename);
 
     char* include_directive = malloc(sizeof (char) * (length + 1));
 
-    if (sprintf(include_directive, "#include \"%s\"\n", filename) != length) {
+    if (sprintf(include_directive, "#include %s%s%s", include_start, filename, include_end) != length) {
         fprintf(stderr, "[Error] %s\n", "Error in create_include_directive");
         exit(EXIT_FAILURE);
     }
@@ -702,7 +711,7 @@ char* create_preprocessor_directive_endif(char* preprocessor_symbol) {
     return preprocessor_directive_endif;
 }
 
-char* create_header(char* module_name) {
+char* create_header_file_contents(char* module_name) {
     char* header_macro_def = create_header_macro_def(module_name);
     
     char* preprocessor_directive_ifndef = create_preprocessor_directive_ifndef(header_macro_def);
@@ -726,7 +735,7 @@ char* create_header(char* module_name) {
     return header;
 }
 
-char* create_filename(const char* module, const char* extension) {
+char* create_filename(char* module, char* extension) {
     int length = strlen(module) + strlen(extension);
 
     char* filename = malloc(sizeof (char) * (length + 1));
@@ -736,12 +745,117 @@ char* create_filename(const char* module, const char* extension) {
     return filename;
 }
 
-char* create_header_filename(const char* module) {
+char* create_header_filename(char* module) {
     return create_filename(module, ".h");
 }
 
-char* create_source_filename(const char* module) {
+void create_header_file(char* module_name) {
+    char* filename = create_header_filename(module_name);
+    FILE* header = fopen(filename, "w");
+    free(filename);
+
+    char* header_contents = create_header_file_contents(module_name);
+    fprintf(header, "%s", header_contents);
+    fclose(header);
+    free(header_contents);
+}
+
+static const char *standard_library_headers[] = {
+    "stdio",
+    "stdlib",
+    "stdarg",
+    "stddef",
+    "stdint",
+    "string",
+    "setjmp",
+    "ctype",
+    "errno",
+    "math",
+    "signal",
+    "time",
+    "locale",
+    "limits",
+    "inttypes"
+};
+
+static const size_t number_of_standard_library_headers = sizeof (standard_library_headers) / sizeof (standard_library_headers[0]);
+
+void create_project_header(char* project_name) {
+    char* header_macro_def = create_header_macro_def(project_name);
+    char* preprocessor_directive_ifndef = create_preprocessor_directive_ifndef(header_macro_def);
+    char* preprocessor_directive_define = create_preprocessor_directive_define(header_macro_def);
+    char* preprocessor_directive_endif  = create_preprocessor_directive_endif(header_macro_def);
+
+    char* header_filename = create_header_filename(project_name);
+    FILE* project_header_file = fopen(header_filename, "w");
+    free(header_filename);
+
+    fprintf(project_header_file, "\n%s\n%s\n\n", preprocessor_directive_ifndef, preprocessor_directive_define);
+
+    for (size_t i = 0; i < number_of_standard_library_headers; ++i) {
+        header_filename = create_header_filename(standard_library_headers[i]);
+        char* include_directive = create_include_directive(header_filename, HEADER_TYPE_SYSTEM);
+        free(header_filename);
+        fprintf(project_header_file, "%s\n", include_directive);
+        free(include_directive);
+    }
+
+    fprintf(project_header_file, "\n#if !defined(FALSE) || !defined(TRUE)\nenum { FALSE = 0, TRUE = !FALSE };\n#endif\n\n%s\n\n", preprocessor_directive_endif);
+    
+    fclose(project_header_file);
+
+    free(preprocessor_directive_ifndef);
+    free(preprocessor_directive_define);
+    free(preprocessor_directive_endif);
+}
+
+char* create_source_filename(char* module) {
     return create_filename(module, ".c");
+}
+
+static const char *main_file_text =
+"\n"
+"#include \"nu.h\"\n"
+"\n"
+"int main(int argc, char **argv)\n"
+"{\n"
+"    for (int i = 1; i < argc; ++i) {\n"
+"        printf(\"%s\\n\", argv[i]);\n"
+"    }\n"
+"\n"
+"    return EXIT_SUCCESS;\n"
+"}\n"
+"\n";
+
+void create_main_project_file(char* project_name) {
+    FILE* main_project_file = fopen("main.c", "w");
+    fprintf(main_project_file, "%s", main_file_text);
+    fclose(main_project_file);
+}
+
+static const char *project_makefile_text =
+"\n"
+"vpath %%.c src\n"
+"\n"
+"TARGET = %s\n"
+"\n"
+"all: $(TARGET)\n"
+"\n"
+"$(TARGET): main.o\n"
+"\t$(CC) $(CFLAGS) $(CPPFLAGS) -I include    -o $@ $^ $(LDFLAGS) $(LIBS)\n"
+"\n"
+"main.o: main.c\n"
+"\t$(CC) $(CFLAGS) $(CPPFLAGS) -I include -c -o $@ $^\n"
+"\n"
+".PHONY: clean\n"
+"clean:\n"
+"\trm -f *.o $(TARGET)\n"
+"\n";
+
+void create_project_makefile(char* project_name) {
+    FILE* project_makefile = fopen("Makefile", "w");
+    fprintf(project_makefile, project_makefile_text, project_name);
+    fclose(project_makefile);
 }
 
 void create_license_file(void) {
@@ -756,7 +870,7 @@ void create_readme_file(char* project_name) {
     fclose(readme_file);
 }
 
-void create_directory(const char* name) {
+void create_directory(char* name) {
     errno = 0;
 
     if (mkdir(name, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH) == -1) {
@@ -774,6 +888,29 @@ void create_directory(const char* name) {
     }
 }
 
+void change_directory(char* path) {
+    errno = 0;
+
+    if (chdir(path) == -1) {
+        switch (errno) {
+            case ENOENT: {
+                fprintf(stderr, "[Error] The specified directory does not exist\n");
+                exit(EXIT_FAILURE);
+            } break;
+
+            case ENOTDIR: {
+                fprintf(stderr, "The specified directory name is not actually a directory\n");
+                exit(EXIT_FAILURE);
+            } break;
+
+            default: {
+                fprintf(stderr, "Unspecified error while attempting to change directory\n");
+                exit(EXIT_FAILURE);
+            } break;
+        }
+    }
+}
+
 typedef enum module_type_e {
     MODULE_TYPE_DIRECTORY,
     MODULE_TYPE_FILE
@@ -784,7 +921,6 @@ struct module_t {
     const char* name;
     struct module_t **children;
 };
-
 static struct module_t modules[] = {
     { MODULE_TYPE_DIRECTORY, "doc"     , NULL },
     { MODULE_TYPE_DIRECTORY, "include" , NULL },
@@ -809,42 +945,8 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
-    errno = 0;
-
-    if (mkdir(argv[1], S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH) == -1) {
-        switch (errno) {
-            case EEXIST: {
-                fprintf(stderr, "Project directory already exists\n");
-                exit(EXIT_FAILURE);
-            } break;
-
-            default: {
-                fprintf(stderr, "Failed to create directory\n");
-                exit(EXIT_FAILURE);
-            }
-        }
-    }
-
-    errno = 0;
-
-    if (chdir(argv[1]) == -1) {
-        switch (errno) {
-            case ENOENT: {
-                fprintf(stderr, "[Error] The specified directory does not exist\n");
-                exit(EXIT_FAILURE);
-            } break;
-
-            case ENOTDIR: {
-                fprintf(stderr, "The specified directory name is not actually a directory\n");
-                exit(EXIT_FAILURE);
-            } break;
-
-            default: {
-                fprintf(stderr, "Unspecified error while attempting to change directory\n");
-                exit(EXIT_FAILURE);
-            } break;
-        }
-    }
+    create_directory(argv[1]);
+    change_directory(argv[1]);
 
     for (size_t i = 0; i < number_of_top_level_project_modules; ++i) {
         if (modules[i].type == MODULE_TYPE_DIRECTORY) {
@@ -854,6 +956,8 @@ int main(int argc, char **argv)
                 create_license_file();
             } else if (strcmp(modules[i].name, "README") == 0) {
                 create_readme_file(argv[1]);
+            } else if (strcmp(modules[i].name, "Makefile") == 0) {
+                create_project_makefile(argv[1]);
             } else {
                 FILE* file = fopen(modules[i].name, "w");
                 fclose(file);
@@ -861,21 +965,18 @@ int main(int argc, char **argv)
         }
     }
 
-    // create_license_file();
-    // create_readme_file(argv[1]);
+    change_directory("include");
 
-    // for (int i = 2; i < argc; ++i) {
-    //     printf("Creating header file: %s.h...\n", argv[i]);
+    create_project_header(argv[1]);
 
-    //     char* filename = create_header_filename(argv[i]);
-    //     FILE* header = fopen(filename, "w");
-    //     free(filename);
+    for (int i = 2; i < argc; ++i) {
+        printf("Creating header file: %s.h...\n", argv[i]);
+        create_header_file(argv[i]);
+    }
 
-    //     char* header_contents = create_header(argv[i]);
-    //     fprintf(header, "%s", header_contents);
-    //     fclose(header);
-    //     free(header_contents);
-    // }
+    change_directory("../src");
+
+    create_main_project_file(argv[1]);
 
     return EXIT_SUCCESS;
 }
