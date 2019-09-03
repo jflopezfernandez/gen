@@ -815,12 +815,12 @@ char* create_source_filename(char* module) {
 
 static const char *main_file_text =
 "\n"
-"#include \"nu.h\"\n"
+"#include \"%s.h\"\n"
 "\n"
 "int main(int argc, char **argv)\n"
 "{\n"
 "    for (int i = 1; i < argc; ++i) {\n"
-"        printf(\"%s\\n\", argv[i]);\n"
+"        printf(\"%%s\\n\", argv[i]);\n"
 "    }\n"
 "\n"
 "    return EXIT_SUCCESS;\n"
@@ -829,7 +829,7 @@ static const char *main_file_text =
 
 void create_main_project_file(char* project_name) {
     FILE* main_project_file = fopen("main.c", "w");
-    fprintf(main_project_file, "%s", main_file_text);
+    fprintf(main_project_file, main_file_text, project_name);
     fclose(main_project_file);
 }
 
@@ -837,19 +837,43 @@ static const char *project_makefile_text =
 "\n"
 "vpath %%.c src\n"
 "\n"
+"OBJS            := $(patsubst %%.c,%%.o,$(notdir $(wildcard src/*.c)))\n"
+"\n"
+"TESTSDIR        := $(strip tests)\n"
+"\n"
+"CC              ?= $(strip gcc)\n"
+"\n"
+"export CP       := $(strip cp -f)\n"
+"export MKDIR    := $(strip mkdir -p)\n"
+"export RM       := $(strip rm -f)\n"
+"\n"
+"export CC       := $(strip $(CC))\n"
+"export CFLAGS   := $(strip $(CFLAGS) -Wall -Wextra -Wpedantic)\n"
+"export CPPFLAGS := $(strip $(CPPFLAGS) -D_GNU_SOURCE -D_POSIX_C_SOURCE -I include)\n"
+"export LDFLAGS  := $(strip $(LDFLAGS))\n"
+"export LIBS     := $(strip $(LIBS) $(LOADLIBES))\n"
+"\n"
 "TARGET = %s\n"
 "\n"
 "all: $(TARGET)\n"
 "\n"
-"$(TARGET): main.o\n"
-"\t$(CC) $(CFLAGS) $(CPPFLAGS) -I include    -o $@ $^ $(LDFLAGS) $(LIBS)\n"
+"$(TARGET): $(OBJS)\n"
+"\t$(CC) $(CFLAGS) $(CPPFLAGS)    -o $@ $^ $(LDFLAGS) $(LIBS)\n"
 "\n"
-"main.o: main.c\n"
-"\t$(CC) $(CFLAGS) $(CPPFLAGS) -I include -c -o $@ $^\n"
+"%%.o: %%.c\n"
+"\t$(CC) $(CFLAGS) $(CPPFLAGS) -c -o $@ $^\n"
 "\n"
 ".PHONY: clean\n"
 "clean:\n"
-"\trm -f *.o $(TARGET)\n"
+"\t$(RM) $(OBJS) $(TARGET)\n"
+"\n"
+".PHONY: check\n"
+"check:\n"
+"\t$(MAKE) -C $(TESTSDIR)\n"
+"\n"
+".PHONY: clean-tests-dir\n"
+"clean-tests-dir:\n"
+"\t$(MAKE) -C $(TESTSDIR) clean\n"
 "\n";
 
 void create_project_makefile(char* project_name) {
@@ -921,6 +945,7 @@ struct module_t {
     const char* name;
     struct module_t **children;
 };
+
 static struct module_t modules[] = {
     { MODULE_TYPE_DIRECTORY, "doc"     , NULL },
     { MODULE_TYPE_DIRECTORY, "include" , NULL },
