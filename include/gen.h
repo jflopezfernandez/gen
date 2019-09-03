@@ -18,8 +18,14 @@
 #include <limits.h>
 #include <inttypes.h>
 
+#include <unistd.h>
+
+#include <sys/stat.h>
+
 #if !defined(FALSE) || !defined(TRUE)
 enum { FALSE = 0, TRUE = !FALSE };
 #endif // FALSE || TRUE
+
+#include "file.h"
 
 #endif // PROJECT_INCLUDES_gen_H_
